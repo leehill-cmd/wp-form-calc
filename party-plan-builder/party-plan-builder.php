@@ -38,6 +38,7 @@ class PartyPlanBuilder {
     public function default_settings() {
         return [
             'currency' => '£',
+            'enable_vat' => true,
             'vat_percent' => 20,
             'service_percent' => 0,
             'addons' => [
@@ -97,6 +98,11 @@ class PartyPlanBuilder {
         if (!isset($merged['ui']) || !is_array($merged['ui'])) {
             $merged['ui'] = $this->default_settings()['ui'];
         }
+        if (!isset($merged['enable_vat'])) {
+            $merged['enable_vat'] = true;
+        } else {
+            $merged['enable_vat'] = (bool)$merged['enable_vat'];
+        }
         return $merged;
     }
 
@@ -118,6 +124,7 @@ class PartyPlanBuilder {
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce' => wp_create_nonce('ppb_nonce'),
             'currency' => $s['currency'],
+            'enable_vat' => !empty($s['enable_vat']),
             'vat_percent' => floatval($s['vat_percent']),
             'service_percent' => floatval($s['service_percent']),
             'addons' => $s['addons'],
@@ -439,7 +446,8 @@ class PartyPlanBuilder {
 
         $service = $subtotal * (floatval($s['service_percent'])/100);
         $taxable = $subtotal + $service;
-        $vat = $taxable * (floatval($s['vat_percent'])/100);
+        $enable_vat = !empty($s['enable_vat']);
+        $vat = $enable_vat ? $taxable * (floatval($s['vat_percent'])/100) : 0;
         $grand = $taxable + $vat;
 
         $grand_pp = $guests > 0 ? ($grand / $guests) : $grand;
@@ -461,7 +469,8 @@ class PartyPlanBuilder {
                 'vat_pp' => $vat_pp,
                 'grand_pp' => $grand_pp,
             ],
-            'currency' => $s['currency']
+            'currency' => $s['currency'],
+            'enable_vat' => $enable_vat
         ];
     }
 
@@ -479,6 +488,7 @@ class PartyPlanBuilder {
         $defaults = $this->default_settings();
         $out = [
             'currency' => isset($input['currency']) ? sanitize_text_field($input['currency']) : $defaults['currency'],
+            'enable_vat' => !empty($input['enable_vat']),
             'vat_percent' => isset($input['vat_percent']) ? floatval($input['vat_percent']) : $defaults['vat_percent'],
             'service_percent' => isset($input['service_percent']) ? floatval($input['service_percent']) : $defaults['service_percent'],
             'admin_notify' => isset($input['admin_notify']) ? sanitize_email($input['admin_notify']) : $defaults['admin_notify'],
@@ -575,6 +585,10 @@ class PartyPlanBuilder {
                     <tr>
                         <th scope="row"><label for="currency">Currency symbol</label></th>
                         <td><input name="<?php echo self::OPTION_KEY; ?>[currency]" id="currency" type="text" value="<?php echo esc_attr($s['currency']); ?>" class="regular-text" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="enable_vat">Enable VAT</label></th>
+                        <td><input name="<?php echo self::OPTION_KEY; ?>[enable_vat]" id="enable_vat" type="checkbox" value="1" <?php checked(!empty($s['enable_vat'])); ?> /></td>
                     </tr>
                     <tr>
                         <th scope="row"><label for="vat_percent">VAT percent</label></th>
@@ -843,6 +857,14 @@ class PartyPlanBuilder {
                             <td align="right" style="padding:8px 6px;color:#6b7280"><?php echo $currency . number_format((float)$sum['service_pp'],2); ?></td>
                         </tr>
                         <?php endif; ?>
+                        <?php if (!empty($calc['enable_vat']) && $sum['vat'] > 0): ?>
+                        <tr>
+                            <td style="padding:8px 6px"><strong>VAT</strong></td>
+                            <td align="right" style="padding:8px 6px"><?php echo $currency . number_format((float)$sum['vat'],2); ?></td>
+                            <td align="right" style="padding:8px 6px;color:#6b7280">/ person</td>
+                            <td align="right" style="padding:8px 6px;color:#6b7280"><?php echo $currency . number_format((float)$sum['vat_pp'],2); ?></td>
+                        </tr>
+                        <?php endif; ?>
                         <tr>
                             <td style="padding:10px 6px;border-top:1px solid #e5e7eb"><strong>Total</strong></td>
                             <td align="right" style="padding:10px 6px;border-top:1px solid #e5e7eb"><strong><?php echo $currency . number_format((float)$sum['grand'],2); ?></strong></td>
@@ -1019,7 +1041,7 @@ class PartyPlanBuilder {
 
                 const service = subtotal * ((parseFloat(cfg.service_percent)||0)/100);
                 const taxable = subtotal + service;
-                const vat = taxable * ((parseFloat(cfg.vat_percent)||0)/100);
+                const vat = cfg.enable_vat ? taxable * ((parseFloat(cfg.vat_percent)||0)/100) : 0;
                 const grand = taxable + vat;
                 const grandPP = guests>0 ? grand/guests : grand;
 
@@ -1046,7 +1068,7 @@ class PartyPlanBuilder {
                 }
                 rows.push(row('Subtotal', fmt(totals.subtotal)));
                 if (parseFloat(cfg.service_percent)) rows.push(row('Service ' + cfg.service_percent + '%', fmt(totals.service)));
-                rows.push(row('VAT ' + cfg.vat_percent + '%', fmt(totals.vat)));
+                if (cfg.enable_vat && parseFloat(cfg.vat_percent)) rows.push(row('VAT ' + cfg.vat_percent + '%', fmt(totals.vat)));
                 rows.push(`<div class="ppb-row"><span><strong>Total</strong></span><span><strong>${fmt(totals.grand)}</strong></span></div>`);
                 rows.push(`<div class="ppb-row"><span class="ppb-muted">Per person</span><span class="ppb-muted">${fmt(totals.grandPP)}</span></div>`);
                 summary.html(rows.join(''));
