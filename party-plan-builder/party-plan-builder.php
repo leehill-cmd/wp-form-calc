@@ -46,6 +46,10 @@ class PartyPlanBuilder {
                 ['id' => 'spa_pool', 'label' => 'Spa Pool Access', 'type' => 'fixed', 'amount' => 250, 'frequency' => 'per_night', 'min_guests' => 0, 'max_guests' => 0],
                 ['id' => 'dessert_course', 'label' => 'Extra Dessert Course', 'type' => 'per_person', 'amount' => 6, 'frequency' => 'once', 'min_guests' => 0, 'max_guests' => 0],
             ],
+            'drinks_package' => [
+                'enabled' => false,
+                'label' => 'Drinks Package',
+            ],
             'pricing' => [
                 'base_pp_by_dow' => [30,30,30,30,35,40,40], // Mon..Sun
                 'special_ranges' => []
@@ -84,6 +88,24 @@ class PartyPlanBuilder {
             if (!isset($a['min_guests'])) $a['min_guests'] = 0;
             if (!isset($a['max_guests'])) $a['max_guests'] = 0;
             if (empty($a['frequency'])) $a['frequency'] = 'once';
+        }
+        if (!isset($merged['drinks_package']) || !is_array($merged['drinks_package'])) {
+            $merged['drinks_package'] = ['enabled' => false, 'label' => 'Drinks Package'];
+        } else {
+            if (!isset($merged['drinks_package']['enabled'])) $merged['drinks_package']['enabled'] = false;
+            if (!isset($merged['drinks_package']['label'])) $merged['drinks_package']['label'] = 'Drinks Package';
+        }
+        $merged['addons'] = array_values(array_filter($merged['addons'], function($a){ return ($a['id'] ?? '') !== 'drinks_package'; }));
+        if (!empty($merged['drinks_package']['enabled'])) {
+            $merged['addons'][] = [
+                'id' => 'drinks_package',
+                'label' => $merged['drinks_package']['label'],
+                'type' => 'fixed',
+                'frequency' => 'per_night',
+                'amount' => 0,
+                'min_guests' => 0,
+                'max_guests' => 0,
+            ];
         }
         if (!isset($merged['pricing']['base_pp_by_dow']) || !is_array($merged['pricing']['base_pp_by_dow'])) {
             $merged['pricing']['base_pp_by_dow'] = [30,30,30,30,35,40,40];
@@ -413,6 +435,11 @@ class PartyPlanBuilder {
         $per_person_nightly_addons = 0; $fixed_nightly_addons = 0; $oneoff_per_person = 0; $oneoff_fixed = 0;
         foreach ($s['addons'] as $a) {
             if (!in_array($a['id'], $selected_addons, true)) continue;
+            if ($a['id'] === 'drinks_package') {
+                $amount = min(500 + max(0, $guests-20) * 25, 1000);
+                $fixed_nightly_addons += $amount;
+                continue;
+            }
             $amount = floatval($a['amount']); $freq = isset($a['frequency']) ? $a['frequency'] : 'once';
             if ($a['type'] === 'per_person') { if ($freq === 'per_night') $per_person_nightly_addons += $amount; else $oneoff_per_person += $amount; }
             else { if ($freq === 'per_night') $fixed_nightly_addons += $amount; else $oneoff_fixed += $amount; }
@@ -482,6 +509,7 @@ class PartyPlanBuilder {
             'vat_percent' => isset($input['vat_percent']) ? floatval($input['vat_percent']) : $defaults['vat_percent'],
             'service_percent' => isset($input['service_percent']) ? floatval($input['service_percent']) : $defaults['service_percent'],
             'admin_notify' => isset($input['admin_notify']) ? sanitize_email($input['admin_notify']) : $defaults['admin_notify'],
+            'drinks_package' => ['enabled' => false, 'label' => $defaults['drinks_package']['label']],
             'addons' => [],
             'pricing' => ['base_pp_by_dow' => [30,30,30,30,35,40,40], 'special_ranges' => []],
             'brand' => $defaults['brand'],
@@ -491,10 +519,12 @@ class PartyPlanBuilder {
         if (!empty($input['addons']) && is_array($input['addons'])) {
             foreach ($input['addons'] as $a) {
                 if (empty($a['label'])) continue;
+                $id = sanitize_title($a['id'] ?? $a['label']);
+                if ($id === 'drinks_package') continue;
                 $type = ($a['type'] === 'per_person') ? 'per_person' : 'fixed';
                 $freq = ($a['frequency'] === 'per_night') ? 'per_night' : 'once';
                 $out['addons'][] = [
-                    'id' => sanitize_title($a['id'] ?? $a['label']),
+                    'id' => $id,
                     'label' => sanitize_text_field($a['label']),
                     'type' => $type,
                     'frequency' => $freq,
@@ -503,6 +533,14 @@ class PartyPlanBuilder {
                     'max_guests' => isset($a['max_guests']) ? intval($a['max_guests']) : 0,
                 ];
             }
+        }
+
+        if (!empty($input['drinks_package']) && is_array($input['drinks_package'])) {
+            $dp = $input['drinks_package'];
+            $out['drinks_package'] = [
+                'enabled' => !empty($dp['enabled']),
+                'label' => sanitize_text_field($dp['label'] ?? $defaults['drinks_package']['label']),
+            ];
         }
 
         if (!empty($input['pricing']['base_pp_by_dow']) && is_array($input['pricing']['base_pp_by_dow'])) {
@@ -563,6 +601,7 @@ class PartyPlanBuilder {
         $addons   = is_array($s['addons']) ? array_values($s['addons']) : [];
         $brand    = $s['brand'];
         $ui       = $s['ui'];
+        $drinks   = $s['drinks_package'];
         if (empty($addons)) $addons = [['id' => 'string_quartet','label' => 'String Quartet','type' => 'fixed','frequency' => 'once','amount' => 350,'min_guests' => 0,'max_guests' => 0]];
         ?>
         <div class="wrap">
@@ -620,6 +659,18 @@ class PartyPlanBuilder {
                     </tbody>
                 </table>
                 <p><button type="button" class="button" id="ppb-add-addon">Add add-on</button></p>
+
+                <h2>Drinks Package</h2>
+                <table class="form-table" role="presentation">
+                    <tr>
+                        <th scope="row">Enable?</th>
+                        <td><label><input type="checkbox" name="<?php echo self::OPTION_KEY; ?>[drinks_package][enabled]" value="1" <?php checked(true, !empty($drinks['enabled'])); ?>> Yes</label></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="drinks_package_label">Label</label></th>
+                        <td><input name="<?php echo self::OPTION_KEY; ?>[drinks_package][label]" id="drinks_package_label" type="text" value="<?php echo esc_attr($drinks['label']); ?>" class="regular-text" /></td>
+                    </tr>
+                </table>
 
                 <h2>Pricing Rules</h2>
                 <h3>Base per-person price by day</h3>
@@ -980,6 +1031,11 @@ class PartyPlanBuilder {
                 let perPersonNightly = 0, fixedNightly = 0, perPersonOnce = 0, fixedOnce = 0;
                 const selectedAddons = $form.find('[name="addons[]"]:checked').map(function(){return $(this).val();}).get();
                 selectedAddons.forEach(id => {
+                    if (id === 'drinks_package') {
+                        const drinks = Math.min(500 + Math.max(0, guests-20)*25, 1000);
+                        fixedNightly += drinks;
+                        return;
+                    }
                     const a = cfg.addons.find(x => x.id === id);
                     if (!a) return;
                     const amount = parseFloat(a.amount);
@@ -1030,11 +1086,18 @@ class PartyPlanBuilder {
             }
 
             function updateAddonHints($form){
+                const guests = parseInt($form.find('[name="guests"]').val(), 10) || 0;
                 cfg.addons.forEach(a => {
                     const hint = $form.find(`[data-addon="${a.id}"]`);
                     if (!hint.length) return;
-                    if (a.type === 'per_person') hint.text('+' + fmt(a.amount) + (a.frequency==='per_night'?' per person / night':' per person'));
-                    if (a.type === 'fixed') hint.text('+' + fmt(a.amount) + (a.frequency==='per_night'?' per night':' fixed'));
+                    if (a.id === 'drinks_package') {
+                        const cost = Math.min(500 + Math.max(0, guests-20)*25, 1000);
+                        hint.text('+' + fmt(cost) + ' per night');
+                    } else if (a.type === 'per_person') {
+                        hint.text('+' + fmt(a.amount) + (a.frequency==='per_night'?' per person / night':' per person'));
+                    } else if (a.type === 'fixed') {
+                        hint.text('+' + fmt(a.amount) + (a.frequency==='per_night'?' per night':' fixed'));
+                    }
                 });
             }
 
