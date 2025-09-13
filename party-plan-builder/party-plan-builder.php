@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Party Plan Builder
  * Description: Auto-calculating party plan builder with date-driven nightly pricing, styling controls, and branded HTML emails. Shortcode: [party_plan_builder template="simple|advanced" show_estimate="live|gated|off"]
- * Version: 1.6.1
+ * Version: 1.6.2
  * Author: White Star Tools
  */
 
