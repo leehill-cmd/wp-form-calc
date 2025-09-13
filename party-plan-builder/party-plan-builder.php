@@ -40,6 +40,8 @@ class PartyPlanBuilder {
             'currency' => '£',
             'vat_percent' => 20,
             'service_percent' => 0,
+            'min_room_hire_enabled' => false,
+            'min_room_hire_guests' => 20,
             'addons' => [
                 ['id' => 'string_quartet', 'label' => 'String Quartet', 'type' => 'fixed', 'amount' => 350, 'frequency' => 'once', 'min_guests' => 0, 'max_guests' => 0],
                 ['id' => 'private_bar', 'label' => 'Private Bar Setup', 'type' => 'fixed', 'amount' => 150, 'frequency' => 'once', 'min_guests' => 0, 'max_guests' => 0],
@@ -120,6 +122,8 @@ class PartyPlanBuilder {
             'currency' => $s['currency'],
             'vat_percent' => floatval($s['vat_percent']),
             'service_percent' => floatval($s['service_percent']),
+            'min_room_hire_enabled' => !empty($s['min_room_hire_enabled']),
+            'min_room_hire_guests' => intval($s['min_room_hire_guests']),
             'addons' => $s['addons'],
             'pricing' => $s['pricing'],
             'ui' => $s['ui'],
@@ -405,6 +409,7 @@ class PartyPlanBuilder {
 
     private function server_calculate_breakdown($arrival_date, $nights, $guests, $selected_addons) {
         $s = $this->get_settings();
+        $billable_guests = !empty($s['min_room_hire_enabled']) ? max($guests, intval($s['min_room_hire_guests'])) : $guests;
         $dates = [];
         try { $start = new DateTime($arrival_date); } catch (Exception $e) { $start = new DateTime(); }
         for ($i=0; $i<$nights; $i++) { $d = clone $start; $d->modify("+$i day"); $dates[] = $d; }
@@ -426,8 +431,8 @@ class PartyPlanBuilder {
                 'label' => $d->format('D j M Y'),
                 'ppp' => $ppp,
                 'guests' => $guests,
-                'per_person_total' => $ppp * $guests,
-                'per_person_addons' => $per_person_nightly_addons * $guests,
+                'per_person_total' => $ppp * $billable_guests,
+                'per_person_addons' => $per_person_nightly_addons * $billable_guests,
                 'fixed_addons' => $fixed_nightly_addons,
             ];
             $line['night_total'] = $line['per_person_total'] + $line['per_person_addons'] + $line['fixed_addons'];
@@ -435,17 +440,17 @@ class PartyPlanBuilder {
             $subtotal += $line['night_total'];
         }
 
-        $subtotal += ($oneoff_per_person * $guests) + $oneoff_fixed;
+        $subtotal += ($oneoff_per_person * $billable_guests) + $oneoff_fixed;
 
         $service = $subtotal * (floatval($s['service_percent'])/100);
         $taxable = $subtotal + $service;
         $vat = $taxable * (floatval($s['vat_percent'])/100);
         $grand = $taxable + $vat;
 
-        $grand_pp = $guests > 0 ? ($grand / $guests) : $grand;
-        $subtotal_pp = $guests > 0 ? ($subtotal / $guests) : $subtotal;
-        $service_pp = $guests > 0 ? ($service / $guests) : $service;
-        $vat_pp = $guests > 0 ? ($vat / $guests) : $vat;
+        $grand_pp = $billable_guests > 0 ? ($grand / $billable_guests) : $grand;
+        $subtotal_pp = $billable_guests > 0 ? ($subtotal / $billable_guests) : $subtotal;
+        $service_pp = $billable_guests > 0 ? ($service / $billable_guests) : $service;
+        $vat_pp = $billable_guests > 0 ? ($vat / $billable_guests) : $vat;
 
         return [
             'lines' => $line_items,
@@ -481,6 +486,8 @@ class PartyPlanBuilder {
             'currency' => isset($input['currency']) ? sanitize_text_field($input['currency']) : $defaults['currency'],
             'vat_percent' => isset($input['vat_percent']) ? floatval($input['vat_percent']) : $defaults['vat_percent'],
             'service_percent' => isset($input['service_percent']) ? floatval($input['service_percent']) : $defaults['service_percent'],
+            'min_room_hire_enabled' => !empty($input['min_room_hire_enabled']),
+            'min_room_hire_guests' => isset($input['min_room_hire_guests']) ? intval($input['min_room_hire_guests']) : $defaults['min_room_hire_guests'],
             'admin_notify' => isset($input['admin_notify']) ? sanitize_email($input['admin_notify']) : $defaults['admin_notify'],
             'addons' => [],
             'pricing' => ['base_pp_by_dow' => [30,30,30,30,35,40,40], 'special_ranges' => []],
@@ -583,6 +590,13 @@ class PartyPlanBuilder {
                     <tr>
                         <th scope="row"><label for="service_percent">Service percent</label></th>
                         <td><input name="<?php echo self::OPTION_KEY; ?>[service_percent]" id="service_percent" type="number" step="0.1" value="<?php echo esc_attr($s['service_percent']); ?>" /></td>
+                    </tr>
+                    <tr>
+                        <th scope="row"><label for="min_room_hire_guests">Min billable guests</label></th>
+                        <td>
+                            <label><input type="checkbox" name="<?php echo self::OPTION_KEY; ?>[min_room_hire_enabled]" value="1" <?php checked(true, !empty($s['min_room_hire_enabled'])); ?> /> Enable</label>
+                            <input name="<?php echo self::OPTION_KEY; ?>[min_room_hire_guests]" id="min_room_hire_guests" type="number" step="1" min="1" value="<?php echo esc_attr($s['min_room_hire_guests']); ?>" style="width:80px;margin-left:8px;" />
+                        </td>
                     </tr>
                     <tr>
                         <th scope="row">Admin notify email</th>
@@ -974,6 +988,7 @@ class PartyPlanBuilder {
             function calculate(form){
                 const $form = $(form);
                 const guests = parseInt($form.find('[name="guests"]').val(), 10) || 0;
+                const billableGuests = cfg.min_room_hire_enabled ? Math.max(guests, parseInt(cfg.min_room_hire_guests, 10) || 0) : guests;
                 const arrival = $form.find('[name="arrival_date"]').val();
                 const nights = parseInt($form.find('[name="nights"]').val(), 10) || 1;
 
@@ -999,8 +1014,8 @@ class PartyPlanBuilder {
                         for (let i=0;i<nights;i++){
                             const d = new Date(start); d.setDate(d.getDate()+i);
                             const ppp = basePPPForDate(d);
-                            const perPerson = ppp * guests;
-                            const ppAddons = perPersonNightly * guests;
+                            const perPerson = ppp * billableGuests;
+                            const ppAddons = perPersonNightly * billableGuests;
                             const fxAddons = fixedNightly;
                             const nightTotal = perPerson + ppAddons + fxAddons;
                             subtotal += nightTotal;
@@ -1010,18 +1025,18 @@ class PartyPlanBuilder {
                 }
                 if (rows.length === 0){
                     const avgBase = (cfg.pricing?.base_pp_by_dow || []).reduce((a,b)=>a+Number(b||0),0)/7 || 0;
-                    const perPerson = avgBase * guests * nights;
-                    const ppAddons = perPersonNightly * guests * nights;
+                    const perPerson = avgBase * billableGuests * nights;
+                    const ppAddons = perPersonNightly * billableGuests * nights;
                     const fxAddons = fixedNightly * nights;
                     subtotal = perPerson + ppAddons + fxAddons;
                 }
-                subtotal += (perPersonOnce * guests) + fixedOnce;
+                subtotal += (perPersonOnce * billableGuests) + fixedOnce;
 
                 const service = subtotal * ((parseFloat(cfg.service_percent)||0)/100);
                 const taxable = subtotal + service;
                 const vat = taxable * ((parseFloat(cfg.vat_percent)||0)/100);
                 const grand = taxable + vat;
-                const grandPP = guests>0 ? grand/guests : grand;
+                const grandPP = billableGuests>0 ? grand/billableGuests : grand;
 
                 renderSummary($form, rows, {subtotal, service, vat, grand, grandPP});
                 updateAddonHints($form);
