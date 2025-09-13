@@ -1,8 +1,8 @@
 # Party Plan Builder — Handover
 
-Plugin: party-plan-builder v1.6.1
+Plugin: party-plan-builder v1.6.2
 Purpose: Auto-calculating party/venue quote builder for WordPress.
-Install: Plugins → Add New → Upload plugin `party-plan-builder-1.6.1.zip` → Activate.
+Install: Plugins → Add New → Upload plugin `party-plan-builder-1.6.2.zip` → Activate.
 Shortcodes:
 - [party_plan_builder template="simple"]
 - [party_plan_builder template="advanced" show_estimate="gated"]
