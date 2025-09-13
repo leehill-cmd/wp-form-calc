@@ -40,6 +40,7 @@ class PartyPlanBuilder {
             'currency' => '£',
             'vat_percent' => 20,
             'service_percent' => 0,
+            'enable_addons' => true,
             'addons' => [
                 ['id' => 'string_quartet', 'label' => 'String Quartet', 'type' => 'fixed', 'amount' => 350, 'frequency' => 'once', 'min_guests' => 0, 'max_guests' => 0],
                 ['id' => 'private_bar', 'label' => 'Private Bar Setup', 'type' => 'fixed', 'amount' => 150, 'frequency' => 'once', 'min_guests' => 0, 'max_guests' => 0],
@@ -80,6 +81,8 @@ class PartyPlanBuilder {
         $saved = get_option(self::OPTION_KEY);
         if (!is_array($saved)) $saved = [];
         $merged = wp_parse_args($saved, $this->default_settings());
+        if (!isset($merged['enable_addons'])) $merged['enable_addons'] = true;
+        $merged['enable_addons'] = (bool)$merged['enable_addons'];
         foreach ($merged['addons'] as &$a) {
             if (!isset($a['min_guests'])) $a['min_guests'] = 0;
             if (!isset($a['max_guests'])) $a['max_guests'] = 0;
@@ -120,7 +123,8 @@ class PartyPlanBuilder {
             'currency' => $s['currency'],
             'vat_percent' => floatval($s['vat_percent']),
             'service_percent' => floatval($s['service_percent']),
-            'addons' => $s['addons'],
+            'enable_addons' => !empty($s['enable_addons']),
+            'addons' => !empty($s['enable_addons']) ? $s['addons'] : [],
             'pricing' => $s['pricing'],
             'ui' => $s['ui'],
         ]);
@@ -179,6 +183,7 @@ class PartyPlanBuilder {
                         Guests
                         <input type="number" min="1" step="1" name="guests" value="50" required>
                     </label>
+                    <?php if (!empty($s['enable_addons'])): ?>
                     <fieldset class="ppb-fieldset">
                         <legend>Add-ons</legend>
                         <div class="ppb-addon-grid">
@@ -191,6 +196,7 @@ class PartyPlanBuilder {
                         <?php endforeach; ?>
                         </div>
                     </fieldset>
+                    <?php endif; ?>
                     <label>
                         Notes
                         <textarea name="notes" rows="4" placeholder="Anything we should know"></textarea>
@@ -265,6 +271,7 @@ class PartyPlanBuilder {
                             Event type
                             <input type="text" name="event_type" placeholder="Wedding, Corporate, Birthday" required>
                         </label>
+                        <?php if (!empty($s['enable_addons'])): ?>
                         <p class="ppb-muted">Options shown will adapt to your guest count.</p>
                         <div class="ppb-addon-grid">
                         <?php foreach ($s['addons'] as $a): ?>
@@ -275,6 +282,7 @@ class PartyPlanBuilder {
                             </label>
                         <?php endforeach; ?>
                         </div>
+                        <?php endif; ?>
                         <label>
                             Notes
                             <textarea name="notes" rows="4" placeholder="Anything we should know"></textarea>
@@ -405,6 +413,7 @@ class PartyPlanBuilder {
 
     private function server_calculate_breakdown($arrival_date, $nights, $guests, $selected_addons) {
         $s = $this->get_settings();
+        if (empty($s['enable_addons'])) $selected_addons = [];
         $dates = [];
         try { $start = new DateTime($arrival_date); } catch (Exception $e) { $start = new DateTime(); }
         for ($i=0; $i<$nights; $i++) { $d = clone $start; $d->modify("+$i day"); $dates[] = $d; }
@@ -481,6 +490,7 @@ class PartyPlanBuilder {
             'currency' => isset($input['currency']) ? sanitize_text_field($input['currency']) : $defaults['currency'],
             'vat_percent' => isset($input['vat_percent']) ? floatval($input['vat_percent']) : $defaults['vat_percent'],
             'service_percent' => isset($input['service_percent']) ? floatval($input['service_percent']) : $defaults['service_percent'],
+            'enable_addons' => !empty($input['enable_addons']) ? true : false,
             'admin_notify' => isset($input['admin_notify']) ? sanitize_email($input['admin_notify']) : $defaults['admin_notify'],
             'addons' => [],
             'pricing' => ['base_pp_by_dow' => [30,30,30,30,35,40,40], 'special_ranges' => []],
@@ -591,6 +601,7 @@ class PartyPlanBuilder {
                 </table>
 
                 <h2>Add-ons</h2>
+                <p><label><input type="checkbox" name="<?php echo self::OPTION_KEY; ?>[enable_addons]" value="1" <?php checked(true, !empty($s['enable_addons'])); ?>> Enable add-ons</label></p>
                 <p>Frequency decides if an add-on is charged once or per night. Min/Max guests filter by group size (0 = no limit).</p>
                 <table class="widefat fixed striped" id="ppb-addons-table">
                     <thead><tr><th style="width:12%">ID</th><th>Label</th><th style="width:12%">Type</th><th style="width:12%">Frequency</th><th style="width:12%">Amount</th><th style="width:8%">Min</th><th style="width:8%">Max</th><th style="width:10%">Actions</th></tr></thead>
@@ -951,6 +962,7 @@ class PartyPlanBuilder {
         return <<<'JS'
         (function($){
             const cfg = PPB_CONFIG;
+            if (!cfg.enable_addons) cfg.addons = [];
             function fmt(n){ return cfg.currency + Number(n).toFixed(2); }
 
             function basePPPForDate(d){
@@ -978,18 +990,21 @@ class PartyPlanBuilder {
                 const nights = parseInt($form.find('[name="nights"]').val(), 10) || 1;
 
                 let perPersonNightly = 0, fixedNightly = 0, perPersonOnce = 0, fixedOnce = 0;
-                const selectedAddons = $form.find('[name="addons[]"]:checked').map(function(){return $(this).val();}).get();
-                selectedAddons.forEach(id => {
-                    const a = cfg.addons.find(x => x.id === id);
-                    if (!a) return;
-                    const amount = parseFloat(a.amount);
-                    const freq = a.frequency || 'once';
-                    if (a.type === 'per_person') {
-                        if (freq === 'per_night') perPersonNightly += amount; else perPersonOnce += amount;
-                    } else {
-                        if (freq === 'per_night') fixedNightly += amount; else fixedOnce += amount;
-                    }
-                });
+                let selectedAddons = [];
+                if (cfg.addons.length) {
+                    selectedAddons = $form.find('[name="addons[]"]:checked').map(function(){return $(this).val();}).get();
+                    selectedAddons.forEach(id => {
+                        const a = cfg.addons.find(x => x.id === id);
+                        if (!a) return;
+                        const amount = parseFloat(a.amount);
+                        const freq = a.frequency || 'once';
+                        if (a.type === 'per_person') {
+                            if (freq === 'per_night') perPersonNightly += amount; else perPersonOnce += amount;
+                        } else {
+                            if (freq === 'per_night') fixedNightly += amount; else fixedOnce += amount;
+                        }
+                    });
+                }
 
                 let subtotal = 0;
                 const rows = [];
@@ -1024,12 +1039,13 @@ class PartyPlanBuilder {
                 const grandPP = guests>0 ? grand/guests : grand;
 
                 renderSummary($form, rows, {subtotal, service, vat, grand, grandPP});
-                updateAddonHints($form);
+                if (cfg.addons.length) updateAddonHints($form);
 
                 handleEstimateMask($form);
             }
 
             function updateAddonHints($form){
+                if (!cfg.addons.length) return;
                 cfg.addons.forEach(a => {
                     const hint = $form.find(`[data-addon="${a.id}"]`);
                     if (!hint.length) return;
