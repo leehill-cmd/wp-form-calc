@@ -9,3 +9,12 @@ Shortcodes:
 Test: create page with shortcode, submit a quote, confirm CPT `ppb_quote` is created.
 
 Handover pack attached in repo.
+
+## Release
+
+The plugin version is defined in `package.json`.
+
+1. Run `npm version <newversion>` to bump the version. This runs `bin/bump-version.sh` which updates `party-plan-builder.php` and README references.
+2. Build the ZIP archive:
+   `zip -r party-plan-builder-$(node -p "require('./package.json').version").zip party-plan-builder`
+3. Upload the ZIP to WordPress or distribute as needed.

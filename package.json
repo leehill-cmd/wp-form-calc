@@ -1,0 +1,7 @@
+{
+  "name": "party-plan-builder",
+  "version": "1.6.1",
+  "scripts": {
+    "version": "bin/bump-version.sh"
+  }
+}
