@@ -191,7 +191,7 @@ class PartyPlanBuilder {
                         </label>
                         <label class="ppb-inline">
                             Nights
-                            <input type="number" min="1" step="1" name="nights" value="1" required>
+                            <input type="number" min="1" step="1" name="nights" required>
                         </label>
                     </div>
                     <label>
@@ -200,7 +200,7 @@ class PartyPlanBuilder {
                     </label>
                     <label>
                         Guests
-                        <input type="number" min="1" step="1" name="guests" value="50" required>
+                        <input type="number" min="1" step="1" name="guests" required>
                     </label>
                     <fieldset class="ppb-fieldset">
                         <legend>Add-ons</legend>
@@ -268,13 +268,13 @@ class PartyPlanBuilder {
                             </label>
                             <label class="ppb-inline">
                                 Nights
-                                <input type="number" min="1" step="1" name="nights" value="1" required>
+                                <input type="number" min="1" step="1" name="nights" required>
                             </label>
                         </div>
                         <div class="ppb-row-inline">
                             <label class="ppb-inline">
                                 Guests
-                                <input type="number" min="1" step="1" name="guests" value="50" required>
+                                <input type="number" min="1" step="1" name="guests" required>
                             </label>
                         </div>
                         <div class="ppb-step-actions">
@@ -440,7 +440,29 @@ class PartyPlanBuilder {
 
     private function server_calculate_breakdown($arrival_date, $nights, $guests, $selected_addons) {
         $s = $this->get_settings();
-        $billable_guests = !empty($s['min_room_hire_enabled']) ? max($guests, intval($s['min_room_hire_guests'])) : $guests;
+        $guests = intval($guests);
+        $nights = intval($nights);
+        if (empty($arrival_date) || $guests <= 0) {
+            $enable_vat = !empty($s['enable_vat']);
+            return [
+                'lines' => [],
+                'oneoff_per_person' => 0,
+                'oneoff_fixed' => 0,
+                'summary' => [
+                    'subtotal' => 0,
+                    'service' => 0,
+                    'vat' => 0,
+                    'grand' => 0,
+                    'subtotal_pp' => 0,
+                    'service_pp' => 0,
+                    'vat_pp' => 0,
+                    'grand_pp' => 0,
+                ],
+                'currency' => $s['currency'],
+                'enable_vat' => $enable_vat
+            ];
+        }
+        $billable_guests = !empty($s['min_room_hire_enabled']) && $guests > 0 ? max($guests, intval($s['min_room_hire_guests'])) : $guests;
         $dates = [];
         try { $start = new DateTime($arrival_date); } catch (Exception $e) { $start = new DateTime(); }
         for ($i=0; $i<$nights; $i++) { $d = clone $start; $d->modify("+$i day"); $dates[] = $d; }
@@ -1075,9 +1097,18 @@ class PartyPlanBuilder {
             function calculate(form){
                 const $form = $(form);
                 const guests = parseInt($form.find('[name="guests"]').val(), 10) || 0;
-                const billableGuests = cfg.min_room_hire_enabled ? Math.max(guests, parseInt(cfg.min_room_hire_guests, 10) || 0) : guests;
                 const arrival = $form.find('[name="arrival_date"]').val();
-                const nights = parseInt($form.find('[name="nights"]').val(), 10) || 1;
+                const nights = parseInt($form.find('[name="nights"]').val(), 10) || 0;
+
+                if (!arrival || guests <= 0 || nights <= 0) {
+                    const zero = {subtotal: 0, service: 0, vat: 0, grand: 0, grandPP: 0};
+                    renderSummary($form, [], zero);
+                    updateAddonHints($form);
+                    handleEstimateMask($form);
+                    return zero;
+                }
+
+                const billableGuests = cfg.min_room_hire_enabled && guests > 0 ? Math.max(guests, parseInt(cfg.min_room_hire_guests, 10) || 0) : guests;
 
                 let perPersonNightly = 0, fixedNightly = 0, perPersonOnce = 0, fixedOnce = 0;
                 if (cfg.drinks_package && cfg.drinks_package.enabled) {
@@ -1132,6 +1163,7 @@ class PartyPlanBuilder {
                 updateAddonHints($form);
 
                 handleEstimateMask($form);
+                return {subtotal, service, vat, grand, grandPP};
             }
 
             function updateAddonHints($form){
