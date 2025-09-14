@@ -99,17 +99,6 @@ class PartyPlanBuilder {
             if (!isset($merged['drinks_package']['label'])) $merged['drinks_package']['label'] = 'Drinks Package';
         }
         $merged['addons'] = array_values(array_filter($merged['addons'], function($a){ return ($a['id'] ?? '') !== 'drinks_package'; }));
-        if (!empty($merged['drinks_package']['enabled'])) {
-            $merged['addons'][] = [
-                'id' => 'drinks_package',
-                'label' => $merged['drinks_package']['label'],
-                'type' => 'fixed',
-                'frequency' => 'per_night',
-                'amount' => 0,
-                'min_guests' => 0,
-                'max_guests' => 0,
-            ];
-        }
         if (!isset($merged['pricing']['base_pp_by_dow']) || !is_array($merged['pricing']['base_pp_by_dow'])) {
             $merged['pricing']['base_pp_by_dow'] = [30,30,30,30,35,40,40];
         }
@@ -154,6 +143,7 @@ class PartyPlanBuilder {
             'min_room_hire_enabled' => !empty($s['min_room_hire_enabled']),
             'min_room_hire_guests' => intval($s['min_room_hire_guests']),
             'addons' => $s['addons'],
+            'drinks_package' => $s['drinks_package'],
             'pricing' => $s['pricing'],
             'ui' => $s['ui'],
         ]);
@@ -444,14 +434,13 @@ class PartyPlanBuilder {
         for ($i=0; $i<$nights; $i++) { $d = clone $start; $d->modify("+$i day"); $dates[] = $d; }
 
         $line_items = [];
-        $per_person_nightly_addons = 0; $fixed_nightly_addons = 0; $oneoff_per_person = 0; $oneoff_fixed = 0;
+        $per_person_nightly_addons = 0; $fixed_nightly_addons = 0; $oneoff_per_person = 0; $oneoff_fixed = 0; $drinks_total = 0;
+        if (!empty($s['drinks_package']['enabled'])) {
+            $drinks_total = min(500 + max(0, $guests-20) * 25, 1000);
+            $oneoff_fixed += $drinks_total;
+        }
         foreach ($s['addons'] as $a) {
             if (!in_array($a['id'], $selected_addons, true)) continue;
-            if ($a['id'] === 'drinks_package') {
-                $amount = min(500 + max(0, $guests-20) * 25, 1000);
-                $fixed_nightly_addons += $amount;
-                continue;
-            }
             $amount = floatval($a['amount']); $freq = isset($a['frequency']) ? $a['frequency'] : 'once';
             if ($a['type'] === 'per_person') { if ($freq === 'per_night') $per_person_nightly_addons += $amount; else $oneoff_per_person += $amount; }
             else { if ($freq === 'per_night') $fixed_nightly_addons += $amount; else $oneoff_fixed += $amount; }
@@ -491,6 +480,7 @@ class PartyPlanBuilder {
             'lines' => $line_items,
             'oneoff_per_person' => $oneoff_per_person,
             'oneoff_fixed' => $oneoff_fixed,
+            'drinks_package' => $drinks_total,
             'summary' => [
                 'subtotal' => $subtotal,
                 'service' => $service,
@@ -867,6 +857,10 @@ class PartyPlanBuilder {
     private function render_quote_html($name, $email, $arrival, $nights, $guests, $event_type, $notes, $addons, $calc, $for_email = false) {
         $currency = isset($calc['currency']) ? $calc['currency'] : '£';
         $sum = isset($calc['summary']) ? $calc['summary'] : ['subtotal' => 0,'service' => 0,'vat' => 0,'grand' => 0,'subtotal_pp' => 0,'service_pp' => 0,'vat_pp' => 0,'grand_pp' => 0];
+        $s = $this->get_settings();
+        $drinks_label = $s['drinks_package']['label'] ?? 'Drinks Package';
+        $drinks_amount = isset($calc['drinks_package']) ? floatval($calc['drinks_package']) : (!empty($s['drinks_package']['enabled']) ? min(500 + max(0, $guests-20) * 25, 1000) : 0);
+        $billable = ($sum['grand_pp'] > 0) ? max(1, $sum['grand'] / $sum['grand_pp']) : max(1, intval($guests));
         ob_start(); ?>
         <div class="ppb-quote-report" style="<?php echo $for_email ? 'font-family:system-ui,Segoe UI,Arial;color:#111827' : ''; ?>">
             <div class="ppb-quote-header" style="<?php echo $for_email ? 'margin-bottom:12px' : ''; ?>">
@@ -908,6 +902,14 @@ class PartyPlanBuilder {
             <div class="ppb-summary-totals" style="margin-top:12px">
                 <table cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse">
                     <tbody>
+                        <?php if ($drinks_amount > 0): ?>
+                        <tr>
+                            <td style="padding:8px 6px"><?php echo esc_html($drinks_label); ?></td>
+                            <td align="right" style="padding:8px 6px"><?php echo $currency . number_format((float)$drinks_amount,2); ?></td>
+                            <td align="right" style="padding:8px 6px;color:#6b7280">/ person</td>
+                            <td align="right" style="padding:8px 6px;color:#6b7280"><?php echo $currency . number_format((float)($drinks_amount/$billable),2); ?></td>
+                        </tr>
+                        <?php endif; ?>
                         <tr>
                             <td style="padding:8px 6px"><strong>Subtotal</strong></td>
                             <td align="right" style="padding:8px 6px"><?php echo $currency . number_format((float)$sum['subtotal'],2); ?></td>
@@ -1066,13 +1068,11 @@ class PartyPlanBuilder {
                 const nights = parseInt($form.find('[name="nights"]').val(), 10) || 1;
 
                 let perPersonNightly = 0, fixedNightly = 0, perPersonOnce = 0, fixedOnce = 0;
+                if (cfg.drinks_package && cfg.drinks_package.enabled) {
+                    fixedOnce += Math.min(500 + Math.max(0, guests-20)*25, 1000);
+                }
                 const selectedAddons = $form.find('[name="addons[]"]:checked').map(function(){return $(this).val();}).get();
                 selectedAddons.forEach(id => {
-                    if (id === 'drinks_package') {
-                        const drinks = Math.min(500 + Math.max(0, guests-20)*25, 1000);
-                        fixedNightly += drinks;
-                        return;
-                    }
                     const a = cfg.addons.find(x => x.id === id);
                     if (!a) return;
                     const amount = parseFloat(a.amount);
@@ -1127,10 +1127,7 @@ class PartyPlanBuilder {
                 cfg.addons.forEach(a => {
                     const hint = $form.find(`[data-addon="${a.id}"]`);
                     if (!hint.length) return;
-                    if (a.id === 'drinks_package') {
-                        const cost = Math.min(500 + Math.max(0, guests-20)*25, 1000);
-                        hint.text('+' + fmt(cost) + ' per night');
-                    } else if (a.type === 'per_person') {
+                    if (a.type === 'per_person') {
                         hint.text('+' + fmt(a.amount) + (a.frequency==='per_night'?' per person / night':' per person'));
                     } else if (a.type === 'fixed') {
                         hint.text('+' + fmt(a.amount) + (a.frequency==='per_night'?' per night':' fixed'));
