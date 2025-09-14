@@ -41,6 +41,7 @@ class PartyPlanBuilder {
             'enable_vat' => true,
             'vat_percent' => 20,
             'service_percent' => 0,
+            'addons_enabled' => true,
             'min_room_hire_enabled' => false,
             'min_room_hire_guests' => 20,
             'addons' => [
@@ -127,6 +128,11 @@ class PartyPlanBuilder {
         } else {
             $merged['enable_vat'] = (bool)$merged['enable_vat'];
         }
+        if (!isset($merged['addons_enabled'])) {
+            $merged['addons_enabled'] = true;
+        } else {
+            $merged['addons_enabled'] = (bool)$merged['addons_enabled'];
+        }
         return $merged;
     }
 
@@ -153,6 +159,7 @@ class PartyPlanBuilder {
             'service_percent' => floatval($s['service_percent']),
             'min_room_hire_enabled' => !empty($s['min_room_hire_enabled']),
             'min_room_hire_guests' => intval($s['min_room_hire_guests']),
+            'addons_enabled' => !empty($s['addons_enabled']),
             'addons' => $s['addons'],
             'pricing' => $s['pricing'],
             'ui' => $s['ui'],
@@ -212,6 +219,7 @@ class PartyPlanBuilder {
                         Guests
                         <input type="number" min="1" step="1" name="guests" value="50" required>
                     </label>
+<?php if (!empty($s['addons_enabled'])): ?>
                     <fieldset class="ppb-fieldset">
                         <legend>Add-ons</legend>
                         <div class="ppb-addon-grid">
@@ -224,6 +232,7 @@ class PartyPlanBuilder {
                         <?php endforeach; ?>
                         </div>
                     </fieldset>
+<?php endif; ?>
                     <label>
                         Notes
                         <textarea name="notes" rows="4" placeholder="Anything we should know"></textarea>
@@ -298,6 +307,7 @@ class PartyPlanBuilder {
                             Event type
                             <input type="text" name="event_type" placeholder="Wedding, Corporate, Birthday" required>
                         </label>
+<?php if (!empty($s['addons_enabled'])): ?>
                         <p class="ppb-muted">Options shown will adapt to your guest count.</p>
                         <div class="ppb-addon-grid">
                         <?php foreach ($s['addons'] as $a): ?>
@@ -308,6 +318,7 @@ class PartyPlanBuilder {
                             </label>
                         <?php endforeach; ?>
                         </div>
+<?php endif; ?>
                         <label>
                             Notes
                             <textarea name="notes" rows="4" placeholder="Anything we should know"></textarea>
@@ -374,7 +385,11 @@ class PartyPlanBuilder {
         $guests = max(1, intval($_POST['guests']));
         $event_type = isset($_POST['event_type']) ? sanitize_text_field(wp_unslash($_POST['event_type'])) : '';
         $notes = isset($_POST['notes']) ? sanitize_textarea_field(wp_unslash($_POST['notes'])) : '';
-        $addons = isset($_POST['addons']) && is_array($_POST['addons']) ? array_map('sanitize_text_field', array_map('wp_unslash', $_POST['addons'])) : [];
+        $settings = $this->get_settings();
+        $addons = [];
+        if (!empty($settings['addons_enabled'])) {
+            $addons = isset($_POST['addons']) && is_array($_POST['addons']) ? array_map('sanitize_text_field', array_map('wp_unslash', $_POST['addons'])) : [];
+        }
 
         $calc = $this->server_calculate_breakdown($arrival_date, $nights, $guests, $addons);
 
@@ -400,7 +415,6 @@ class PartyPlanBuilder {
             update_post_meta($post_id, 'ppb_' . $k, $v);
         }
 
-        $settings = $this->get_settings();
         $brand = $settings['brand'];
         $admin_to = sanitize_email($settings['admin_notify']);
         $admin_subject = str_replace('{brand}', $brand['name'], $brand['email_subject_admin']);
@@ -445,16 +459,18 @@ class PartyPlanBuilder {
 
         $line_items = [];
         $per_person_nightly_addons = 0; $fixed_nightly_addons = 0; $oneoff_per_person = 0; $oneoff_fixed = 0;
-        foreach ($s['addons'] as $a) {
-            if (!in_array($a['id'], $selected_addons, true)) continue;
-            if ($a['id'] === 'drinks_package') {
-                $amount = min(500 + max(0, $guests-20) * 25, 1000);
-                $fixed_nightly_addons += $amount;
-                continue;
+        if (!empty($s['addons_enabled'])) {
+            foreach ($s['addons'] as $a) {
+                if (!in_array($a['id'], $selected_addons, true)) continue;
+                if ($a['id'] === 'drinks_package') {
+                    $amount = min(500 + max(0, $guests-20) * 25, 1000);
+                    $fixed_nightly_addons += $amount;
+                    continue;
+                }
+                $amount = floatval($a['amount']); $freq = isset($a['frequency']) ? $a['frequency'] : 'once';
+                if ($a['type'] === 'per_person') { if ($freq === 'per_night') $per_person_nightly_addons += $amount; else $oneoff_per_person += $amount; }
+                else { if ($freq === 'per_night') $fixed_nightly_addons += $amount; else $oneoff_fixed += $amount; }
             }
-            $amount = floatval($a['amount']); $freq = isset($a['frequency']) ? $a['frequency'] : 'once';
-            if ($a['type'] === 'per_person') { if ($freq === 'per_night') $per_person_nightly_addons += $amount; else $oneoff_per_person += $amount; }
-            else { if ($freq === 'per_night') $fixed_nightly_addons += $amount; else $oneoff_fixed += $amount; }
         }
 
         $subtotal = 0;
@@ -502,7 +518,8 @@ class PartyPlanBuilder {
                 'grand_pp' => $grand_pp,
             ],
             'currency' => $s['currency'],
-            'enable_vat' => $enable_vat
+            'enable_vat' => $enable_vat,
+            'addons_enabled' => !empty($s['addons_enabled'])
         ];
     }
 
@@ -523,6 +540,7 @@ class PartyPlanBuilder {
             'enable_vat' => !empty($input['enable_vat']),
             'vat_percent' => isset($input['vat_percent']) ? floatval($input['vat_percent']) : $defaults['vat_percent'],
             'service_percent' => isset($input['service_percent']) ? floatval($input['service_percent']) : $defaults['service_percent'],
+            'addons_enabled' => !empty($input['addons_enabled']),
             'min_room_hire_enabled' => !empty($input['min_room_hire_enabled']),
             'min_room_hire_guests' => isset($input['min_room_hire_guests']) ? intval($input['min_room_hire_guests']) : $defaults['min_room_hire_guests'],
             'admin_notify' => isset($input['admin_notify']) ? sanitize_email($input['admin_notify']) : $defaults['admin_notify'],
@@ -658,6 +676,7 @@ class PartyPlanBuilder {
                 </table>
 
                 <h2>Add-ons</h2>
+                <p><label><input type="checkbox" name="<?php echo self::OPTION_KEY; ?>[addons_enabled]" value="1" <?php checked(true, !empty($s['addons_enabled'])); ?> /> Enable add-ons</label></p>
                 <p>Frequency decides if an add-on is charged once or per night. Min/Max guests filter by group size (0 = no limit).</p>
                 <table class="widefat fixed striped" id="ppb-addons-table">
                     <thead><tr><th style="width:12%">ID</th><th>Label</th><th style="width:12%">Type</th><th style="width:12%">Frequency</th><th style="width:12%">Amount</th><th style="width:8%">Min</th><th style="width:8%">Max</th><th style="width:10%">Actions</th></tr></thead>
@@ -867,6 +886,7 @@ class PartyPlanBuilder {
     private function render_quote_html($name, $email, $arrival, $nights, $guests, $event_type, $notes, $addons, $calc, $for_email = false) {
         $currency = isset($calc['currency']) ? $calc['currency'] : '£';
         $sum = isset($calc['summary']) ? $calc['summary'] : ['subtotal' => 0,'service' => 0,'vat' => 0,'grand' => 0,'subtotal_pp' => 0,'service_pp' => 0,'vat_pp' => 0,'grand_pp' => 0];
+        $addons_enabled = isset($calc['addons_enabled']) ? !empty($calc['addons_enabled']) : true;
         ob_start(); ?>
         <div class="ppb-quote-report" style="<?php echo $for_email ? 'font-family:system-ui,Segoe UI,Arial;color:#111827' : ''; ?>">
             <div class="ppb-quote-header" style="<?php echo $for_email ? 'margin-bottom:12px' : ''; ?>">
@@ -886,7 +906,9 @@ class PartyPlanBuilder {
                         <th align="right" style="border-bottom:1px solid #e5e7eb;padding:10px 8px;min-width:110px">PPP</th>
                         <th align="right" style="border-bottom:1px solid #e5e7eb;padding:10px 8px;min-width:90px">Guests</th>
                         <th align="right" style="border-bottom:1px solid #e5e7eb;padding:10px 8px;min-width:170px">Per-person total</th>
+<?php if ($addons_enabled): ?>
                         <th align="right" style="border-bottom:1px solid #e5e7eb;padding:10px 8px;min-width:150px">Night add-ons</th>
+<?php endif; ?>
                         <th align="right" style="border-bottom:1px solid #e5e7eb;padding:10px 8px;min-width:140px">Night total</th>
                     </tr>
                 </thead>
@@ -897,7 +919,9 @@ class PartyPlanBuilder {
                         <td align="right" style="border-bottom:1px solid #f3f4f6;padding:8px 8px"><?php echo esc_html($currency . number_format((float)$line['ppp'],2)); ?></td>
                         <td align="right" style="border-bottom:1px solid #f3f4f6;padding:8px 8px"><?php echo intval($line['guests']); ?></td>
                         <td align="right" style="border-bottom:1px solid #f3f4f6;padding:8px 8px"><?php echo esc_html($currency . number_format((float)$line['per_person_total'],2)); ?></td>
+<?php if ($addons_enabled): ?>
                         <td align="right" style="border-bottom:1px solid #f3f4f6;padding:8px 8px"><?php echo esc_html($currency . number_format((float)($line['per_person_addons'] + $line['fixed_addons']),2)); ?></td>
+<?php endif; ?>
                         <td align="right" style="border-bottom:1px solid #f3f4f6;padding:8px 8px"><strong><?php echo esc_html($currency . number_format((float)$line['night_total'],2)); ?></strong></td>
                     </tr>
                     <?php endforeach; ?>
@@ -1066,23 +1090,26 @@ class PartyPlanBuilder {
                 const nights = parseInt($form.find('[name="nights"]').val(), 10) || 1;
 
                 let perPersonNightly = 0, fixedNightly = 0, perPersonOnce = 0, fixedOnce = 0;
-                const selectedAddons = $form.find('[name="addons[]"]:checked').map(function(){return $(this).val();}).get();
-                selectedAddons.forEach(id => {
-                    if (id === 'drinks_package') {
-                        const drinks = Math.min(500 + Math.max(0, guests-20)*25, 1000);
-                        fixedNightly += drinks;
-                        return;
-                    }
-                    const a = cfg.addons.find(x => x.id === id);
-                    if (!a) return;
-                    const amount = parseFloat(a.amount);
-                    const freq = a.frequency || 'once';
-                    if (a.type === 'per_person') {
-                        if (freq === 'per_night') perPersonNightly += amount; else perPersonOnce += amount;
-                    } else {
-                        if (freq === 'per_night') fixedNightly += amount; else fixedOnce += amount;
-                    }
-                });
+                let selectedAddons = [];
+                if (cfg.addons_enabled) {
+                    selectedAddons = $form.find('[name="addons[]"]:checked').map(function(){return $(this).val();}).get();
+                    selectedAddons.forEach(id => {
+                        if (id === 'drinks_package') {
+                            const drinks = Math.min(500 + Math.max(0, guests-20)*25, 1000);
+                            fixedNightly += drinks;
+                            return;
+                        }
+                        const a = cfg.addons.find(x => x.id === id);
+                        if (!a) return;
+                        const amount = parseFloat(a.amount);
+                        const freq = a.frequency || 'once';
+                        if (a.type === 'per_person') {
+                            if (freq === 'per_night') perPersonNightly += amount; else perPersonOnce += amount;
+                        } else {
+                            if (freq === 'per_night') fixedNightly += amount; else fixedOnce += amount;
+                        }
+                    });
+                }
 
                 let subtotal = 0;
                 const rows = [];
@@ -1117,7 +1144,7 @@ class PartyPlanBuilder {
                 const grandPP = billableGuests>0 ? grand/billableGuests : grand;
 
                 renderSummary($form, rows, {subtotal, service, vat, grand, grandPP});
-                updateAddonHints($form);
+                if (cfg.addons_enabled) updateAddonHints($form);
 
                 handleEstimateMask($form);
             }
