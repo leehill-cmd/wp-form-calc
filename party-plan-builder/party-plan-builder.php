@@ -406,17 +406,29 @@ class PartyPlanBuilder {
         $admin_subject = str_replace('{brand}', $brand['name'], $brand['email_subject_admin']);
         $cust_subject  = str_replace('{brand}', $brand['name'], $brand['email_subject_customer']);
 
-        add_filter('wp_mail_content_type', function(){ return 'text/html; charset=UTF-8'; });
+        add_filter('wp_mail_content_type', [$this, 'mail_content_type']);
+        add_action('wp_mail_failed', [$this, 'log_mail_error']);
         $admin_body = $this->render_email_html($brand, $name, $email, $arrival_date, $nights, $guests, $event_type, $notes, $addons, $calc, true);
         if ($admin_to) wp_mail($admin_to, $admin_subject, $admin_body);
         if (!empty($brand['send_customer_email']) && $email) {
             $cust_body = $this->render_email_html($brand, $name, $email, $arrival_date, $nights, $guests, $event_type, $notes, $addons, $calc, false);
             wp_mail($email, $cust_subject, $cust_body);
         }
-        remove_filter('wp_mail_content_type', '__return_false');
+        remove_action('wp_mail_failed', [$this, 'log_mail_error']);
+        remove_filter('wp_mail_content_type', [$this, 'mail_content_type']);
 
         echo wp_json_encode(['success'=>true,'data'=>['message'=>'Thanks. Your quote has been received. We’ll email you shortly.']]);
         wp_die();
+    }
+
+    public function mail_content_type() {
+        return 'text/html; charset=UTF-8';
+    }
+
+    public function log_mail_error($wp_error) {
+        if (is_wp_error($wp_error)) {
+            error_log('[PPB] Mail error: ' . $wp_error->get_error_message());
+        }
     }
 
     private function ppp_for_date(DateTime $d, $pricing){
