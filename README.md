@@ -18,3 +18,7 @@ The plugin version is defined in `package.json`.
 2. Build the ZIP archive:
    `zip -r party-plan-builder-$(node -p "require('./package.json').version").zip party-plan-builder`
 3. Upload the ZIP to WordPress or distribute as needed.
+
+## AI Legal Document Builder Concept
+
+The repository now includes an architectural and delivery plan for an AI-assisted legal document builder covering the embedded questionnaire experience, document generation workflow, optional legal review, payment handling, and customer portal requirements. See [`docs/ai-legal-tool-plan.md`](docs/ai-legal-tool-plan.md) for details.
